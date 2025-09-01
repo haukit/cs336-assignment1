@@ -1,6 +1,8 @@
+import argparse
 import multiprocessing as mp
 import os
 from collections import Counter
+from pathlib import Path
 from typing import BinaryIO
 
 import regex as re
@@ -248,13 +250,33 @@ def load_merges(filepath: str) -> list[tuple[bytes]]:
 
 
 if __name__ == "__main__":
-    # input_path = "tests/fixtures/tinystories_sample_5M.txt"
-    input_path = "data/TinyStoriesV2-GPT4-train.txt"
-    # input_path = "data/owt_train.txt"
-    vocab_size = 10000
-    special_tokens = ["<|endoftext|>"]
+    # Train BPE
+    parser = argparse.ArgumentParser()
+    parser.add_argument("input_path", type=Path, help="Path to input text file")
+    parser.add_argument(
+        "output_dir",
+        type=Path,
+        nargs="?",
+        help="Directory to save vocab and merges (default: same as input file)",
+    )
+    parser.add_argument("--vocab_size", type=int, default=1000, help="Vocabulary size")
+    parser.add_argument(
+        "--special_tokens",
+        nargs="*",
+        default=["<|endoftext|>"],
+        help="List of special tokens (space separated)",
+    )
+    args = parser.parse_args()
 
-    vocab, merges = train_bpe(input_path, vocab_size, special_tokens)
+    vocab, merges = train_bpe(args.input_path, args.vocab_size, args.special_tokens)
 
-    save_vocab(vocab, "data/TinyStoriesV2-vocab.txt")
-    save_merges(merges, "data/TinyStoriesV2-merges.txt")
+    # Default output_dir = input file's parent
+    out_dir = args.output_dir or args.input_path.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    base = args.input_path.stem
+    vocab_file = out_dir / f"{base}-vocab.txt"
+    merges_file = out_dir / f"{base}-merges.txt"
+
+    save_vocab(vocab, vocab_file)
+    save_merges(merges, merges_file)
