@@ -1,10 +1,12 @@
 import multiprocessing as mp
 import os
+from collections import Counter
 from typing import BinaryIO
 
 import regex as re
 
 GPT2_PRETOKENIZATION_PATTERN = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+PRETOKENIZATION_REGEX = re.compile(GPT2_PRETOKENIZATION_PATTERN)
 
 
 def initialize_vocabulary(special_tokens: list[str]) -> dict[int, bytes]:
@@ -17,87 +19,76 @@ def initialize_vocabulary(special_tokens: list[str]) -> dict[int, bytes]:
     return dict(zip(token_ids, all_bytes))
 
 
-def pretokenize(text: str, pattern: str) -> dict[tuple[bytes, bytes], int]:
-    pretoken_dict = {}
-    for match in re.finditer(pattern, text):
+def pretokenize(text: str) -> Counter:
+    pretoken_dict = Counter()
+    for match in PRETOKENIZATION_REGEX.finditer(text):
         pretoken = match.group().encode("utf-8")
-        pretoken = tuple([bytes([x]) for x in pretoken])
-        pretoken_dict[pretoken] = pretoken_dict.get(pretoken, 0) + 1
+        pretoken = tuple(bytes([x]) for x in pretoken)
+        pretoken_dict[pretoken] += 1
 
     return pretoken_dict
 
 
-def pretokenize_chunk(args: tuple[str, str, str]) -> dict[tuple[bytes], int]:
+def pretokenize_chunk(args: tuple[str, str]) -> Counter:
     """Worker function for multiprocessing pretokenization"""
-    subchunk, pattern, special_token_pattern = args
+    chunk, special_token_pattern = args
 
-    chunk_pretoken_dict = {}
+    chunk_pretoken_dict = Counter()
 
     if special_token_pattern:
         # Find all special tokens and their positions
         special_tokens_in_chunk = []
-        for match in re.finditer(special_token_pattern, subchunk):
+        for match in re.finditer(special_token_pattern, chunk):
             special_tokens_in_chunk.append((match.start(), match.end(), match.group()))
 
-        # Process text between special tokens
+        # Process text between special tokens; the special tokens themselves do not need to be counted
         last_end = 0
         for start, end, token_text in special_tokens_in_chunk:
             # Process text before this special token
             if start > last_end:
-                text_segment = subchunk[last_end:start]
-                if text_segment:
-                    sub_dict = pretokenize(text_segment, pattern)
-                    chunk_pretoken_dict = merge_pretoken_dicts(chunk_pretoken_dict, sub_dict)
-
-            # Add the special token as a single, indivisible unit
-            special_token_bytes = (token_text.encode("utf-8"),)  # Single element tuple
-            chunk_pretoken_dict[special_token_bytes] = chunk_pretoken_dict.get(special_token_bytes, 0) + 1
+                subchunk = chunk[last_end:start]
+                if subchunk:
+                    subchunk_pretoken_dict = pretokenize(subchunk)
+                    chunk_pretoken_dict.update(subchunk_pretoken_dict)
 
             last_end = end
 
         # Process any remaining text after the last special token
-        if last_end < len(subchunk):
-            text_segment = subchunk[last_end:]
-            if text_segment:
-                sub_dict = pretokenize(text_segment, pattern)
-                chunk_pretoken_dict = merge_pretoken_dicts(chunk_pretoken_dict, sub_dict)
+        if last_end < len(chunk):
+            subchunk = chunk[last_end:]
+            if subchunk:
+                subchunk_pretoken_dict = pretokenize(subchunk)
+                chunk_pretoken_dict.update(subchunk_pretoken_dict)
 
     else:
         # No special tokens, process normally
-        chunk_pretoken_dict = pretokenize(subchunk, pattern)
+        chunk_pretoken_dict = pretokenize(chunk)
 
     return chunk_pretoken_dict
 
 
-def find_merge(pretoken_dict: dict[tuple[bytes, bytes], int]) -> tuple[bytes, bytes]:
+def find_merge(pretoken_dict: Counter) -> tuple[bytes, bytes]:
     # Find most frequent pairs
-    pair_dict = {}
+    pair_dict = Counter()
     for pretoken, pretoken_count in pretoken_dict.items():
-        # Skip special tokens in merge finding
-        # Special tokens are stored as single-element tuples with the full token bytes
-        # Regular pretokens have multiple single-byte elements
-        if len(pretoken) == 1 and len(pretoken[0]) > 1:
-            continue
-
-        pairs = [pretoken[i : i + 2] for i in range(len(pretoken) - 1)]
-        for pair in pairs:
-            pair_dict[pair] = pair_dict.get(pair, 0) + pretoken_count
+        for i in range(len(pretoken) - 1):
+            pair_dict[pretoken[i : i + 2]] += pretoken_count
 
     if not pair_dict:
-        # No pairs to merge (shouldn't happen in practice with large corpus)
+        # No pairs to merge
         return None
 
     max_pair_freq = max(pair_dict.values())
-    merge_candidates = [x for x in pair_dict.keys() if pair_dict[x] == max_pair_freq]
+    merge_candidates = [pair for pair, freq in pair_dict.items() if freq == max_pair_freq]
 
     # Return lexicographically greatest pair
     return max(merge_candidates)
 
 
 def apply_merge(
-    pretoken_dict: dict[tuple[bytes, bytes], int],
+    pretoken_dict: Counter,
     merge: tuple[bytes, bytes],
-) -> dict[tuple[bytes, bytes], int]:
+) -> Counter:
     if merge is None:
         return pretoken_dict
 
@@ -105,10 +96,6 @@ def apply_merge(
     merged = b"".join(merge)
 
     for pretoken in pretokens:
-        # Don't apply merges to special tokens
-        if len(pretoken) == 1 and len(pretoken[0]) > 1:
-            continue
-
         new_pretoken = []
 
         i = 0
@@ -172,13 +159,6 @@ def find_chunk_boundaries(file: BinaryIO, desired_num_chunks: int, split_special
     return sorted(set(chunk_boundaries))
 
 
-def merge_pretoken_dicts(d1: dict[tuple[bytes], str], d2: dict[tuple[bytes], str]) -> dict[tuple[bytes], str]:
-    for key, value in d2.items():
-        d1[key] = d1.get(key, 0) + value
-
-    return d1
-
-
 def train_bpe(
     input_path: str,
     vocab_size: int,
@@ -193,26 +173,25 @@ def train_bpe(
     num_merges = vocab_size - len(vocab)
 
     # Pretokenize: Split corpus into chunks and prepare inputs for multiprocessing worker function
-    pretoken_dict = {}
-
     chunks = []
     with open(input_path, "rb") as f:
         boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
         for start, end in zip(boundaries[:-1], boundaries[1:]):
             f.seek(start)
-            chunk = f.read(end - start).decode("utf-8", errors="ignore")
-            chunks.append((chunk, GPT2_PRETOKENIZATION_PATTERN, special_token_pattern))
+            chunk_text = f.read(end - start).decode("utf-8", errors="ignore")
+            chunks.append((chunk_text, special_token_pattern))
 
     # Pretokenize: Use multiprocessing to pretokenize each chunk and merge results
     if len(chunks) > 1:
         with mp.Pool(processes=num_processes) as pool:
-            chunk_results = pool.map(pretokenize_chunk, chunks)
+            chunk_pretoken_dicts = pool.map(pretokenize_chunk, chunks)
     else:
         # Fallback to sequential processing
-        chunk_results = [pretokenize_chunk(chunk) for chunk in chunks]
+        chunk_pretoken_dicts = [pretokenize_chunk(chunk) for chunk in chunks]
 
-    for chunk_dict in chunk_results:
-        pretoken_dict = merge_pretoken_dicts(pretoken_dict, chunk_dict)
+    pretoken_dict = Counter()
+    for d in chunk_pretoken_dicts:
+        pretoken_dict.update(d)
 
     print(f"Pretokenization complete. Found {len(pretoken_dict)} unique pretokens")
     print(f"Computing {num_merges} merges...")
