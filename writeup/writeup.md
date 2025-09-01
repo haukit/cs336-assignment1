@@ -19,8 +19,7 @@
 ### `train_bpe_tinystories`
 
 - The longest token in the vocabulary is token ID 7160 which is " accomplishment". This being a valid English word is reasonable since TinyStories is a relatively clean dataset.
-- According to Scalene, training took 11 mins 6 secs, with peak memory usage of 7 GB. 42% of the execution time was spent on pretokenization, in particular encoding the matched pretoken strings into pretoken bytes, and then splitting each one into a tuple of individual bytes.
-- Not quite under the target 2 mins, even with multiprocessing during pretokenization. My intuition is that the target was given based on a more powerful machine. My peak memory usage of 7 GB for my 8 GB M2 MacBook Air may indicate that I hit my memory limit, and so am going through a lower number of chunks in parallel than expected.
+- According to Scalene, training took 3m 1s, with peak memory usage of 5 GB. 66% of the execution time was spent on pretokenization, in particular splitting the pretoken bytes into tuples of individual bytes.
 
 ### `train_bpe_expts_owt`
 

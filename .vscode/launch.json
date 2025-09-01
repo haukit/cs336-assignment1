@@ -1,0 +1,16 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "train_bpe",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "cs336_basics/tokenizer.py",
+            "console": "integratedTerminal",
+            "args": ["tests/fixtures/tinystories_sample_5M.txt"]
+        }
+    ]
+}
