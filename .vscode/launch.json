@@ -11,6 +11,14 @@
             "program": "cs336_basics/tokenizer.py",
             "console": "integratedTerminal",
             "args": ["tests/fixtures/tinystories_sample_5M.txt"]
+        },
+        {
+            "name": "bpe_encode",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "cs336_basics/tokenizer.py",
+            "console": "integratedTerminal",
+            "args": ["tests/fixtures/tinystories_sample_5M.txt"]
         }
     ]
 }
