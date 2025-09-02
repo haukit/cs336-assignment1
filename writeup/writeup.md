@@ -26,3 +26,9 @@
 - Tried training on OWT but terminated due to lack of memory, because `owt_train.txt` itself is 11 GB, and my code loads the whole file into memory at once.
 - I would assume the OWT tokenizer is able to achieve a greater compression ratio than the TinyStories tokenizer since it is trained on a larger vocab size of 32000.
 
+### `tokenizer_experiments`
+
+- On 10 documents sampled from `TinyStoriesV2-GPT4-valid.txt`, TinyStories tokenizer achieved a compression ratio of 4.19.
+- If the TinyStories tokenizer was used to tokenize OpenWebText documents, I would expect the compression ratio to be lower, since the merges would not have been optimized for the style of text in OpenWebText.
+- Scalene reported an execution time of 712ms on my 8GB M2 MacBook Air. Since the total bytes count is 7862 for the 10 documents, the throughput works out to be 1.104E5 bytes/s. Thus the 825 GB Pile dataset would take 7.473E6s or 86 days.
+- `uint16` is the most efficient choice given the vocabulary sizes in both tokenizers (2^8 < x < 2^16).

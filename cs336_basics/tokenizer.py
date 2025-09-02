@@ -2,6 +2,7 @@ import re
 from collections.abc import Iterable, Iterator
 
 from cs336_basics.train_bpe import PRETOKENIZATION_REGEX, load_merges, load_vocab
+from cs336_basics.utils import sample_documents
 
 
 class Tokenizer:
@@ -87,10 +88,14 @@ if __name__ == "__main__":
     special_tokens = ["<|endoftext|>"]
     tokenizer = Tokenizer.from_files(vocab_filepath, merges_filepath, special_tokens)
 
-    text = "Hello, how <|endoftext|> are you?<|endoftext|>"
-    token_ids = tokenizer.encode(text)
+    docs = sample_documents("data/TinyStoriesV2-GPT4-valid.txt", num_samples=10, num_load=100, seed=123)
 
-    print(f"IDs: {token_ids}")
-    print(f"Length of text: {len(text)}")
-    print(f"Length of encoding: {len(token_ids)}")
-    print(f"Compression ratio: {len(text) / len(token_ids)}")
+    total_bytes_count = 0
+    total_ids_count = 0
+    for doc in docs:
+        token_ids = tokenizer.encode(doc)
+        total_bytes_count += len(doc.encode("utf-8"))
+        total_ids_count += len(token_ids)
+
+    print(f"Total bytes: {total_bytes_count}")
+    print(f"Compression ratio (bytes/token): {total_bytes_count / total_ids_count}")
